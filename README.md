@@ -37,6 +37,10 @@ flowchart LR
 
 工具固定为 sing-box 1.14.4、cloudflared 2026.10.3；下载地址和官方 SHA-256 在 [tools.lock.json](tools.lock.json)，程序会校验后再使用，不自动安装服务或修改防火墙。
 
+## 让 Codex 或其他 Agent 帮你部署
+
+复制[Agent 自动部署提示词](docs/agent-install-prompt.md)中的完整内容，填写部署目录，交给能操作你校内 Windows 电脑的 Codex 或其他 Agent。提示词包含环境检查、工具校验、启动、完整链路验证和手机导入指导；不包含任何作者的个人凭据。仅能访问云端容器的 Agent 无法直接部署到你的校内电脑。
+
 ## 快速部署：临时入口
 
 ### 1. 下载项目
