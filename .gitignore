@@ -1,0 +1,13 @@
+/private/
+/tools/
+__pycache__/
+*.py[cod]
+*.log
+/.env
+/config.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+.DS_Store

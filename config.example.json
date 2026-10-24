@@ -1,0 +1,12 @@
+{
+  "node_name": "JLU-Campus",
+  "allowed_domains": ["yjs.jlu.edu.cn", "cas.jlu.edu.cn", "oa.jlu.edu.cn"],
+  "allowed_ports": [80, 443],
+  "web_port": 18080,
+  "vmess_port": 18081,
+  "metrics_port": 18082,
+  "check_port": 18083,
+  "tunnel_mode": "quick",
+  "hostname": "",
+  "cloudflare_token_file": "cloudflare-token.txt"
+}

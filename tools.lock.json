@@ -1,0 +1,17 @@
+{
+  "platform": "windows-amd64",
+  "sing-box": {
+    "version": "1.14.4",
+    "filename": "sing-box-1.14.4-windows-amd64.zip",
+    "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-amd64.zip",
+    "sha256": "99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df",
+    "executable": "sing-box-1.14.4-windows-amd64/sing-box.exe"
+  },
+  "cloudflared": {
+    "version": "2026.10.3",
+    "filename": "cloudflared-windows-amd64.exe",
+    "url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.3/cloudflared-windows-amd64.exe",
+    "sha256": "76b2805253d0d6ffacb092a7acfbee99e7af6917835c0c5410e23f3ef5052da2",
+    "executable": "cloudflared-windows-amd64.exe"
+  }
+}
