@@ -1,6 +1,20 @@
 # 吉林大学校园网外网访问_Shadowrocket
 
-让 iPhone 上的 Shadowrocket 经一台在线的校内 Windows 电脑访问吉林大学研究生系统、CAS 统一认证和 OA。无需电脑公网 IP，无需设置路由器端口映射。
+让 iPhone 上的 Shadowrocket 经一台在线的校内 Windows 电脑访问吉林大学研究生、选课、就业等系统。无需电脑公网 IP，无需设置路由器端口映射。
+
+默认允许以下9个具体域名：
+
+| 域名 | 入口 |
+| --- | --- |
+| `yjs.jlu.edu.cn` | 研究生系统 |
+| `cas.jlu.edu.cn` | 统一身份认证 |
+| `oa.jlu.edu.cn` | OA |
+| `yjsxk.jlu.edu.cn` | 研究生选课 |
+| `jdjyw.jlu.edu.cn` | 就业相关入口 |
+| `jlupy.jlu.edu.cn` | 指定校内系统入口 |
+| `www.jlu.edu.cn` | 吉林大学主页 |
+| `i.jlu.edu.cn` | 校园门户 |
+| `cwsf.jlu.edu.cn` | 缴费入口 `/WF_PAYMENT/` |
 
 **前提：校内电脑本身必须能打开目标网站。** 这是“校内电脑中转”方案，不能把一台无法访问校园内网的普通校外电脑变成校园网。
 
@@ -87,9 +101,11 @@ CAS 统一身份认证页面属于学校业务系统的正常登录流程。网�
 py -3 -B .\jlu_shadowrocket.py check
 ```
 
-它会实际经过公网 TLS、VMess 和校内电脑请求默认三个站点，跟随认证跳转、校验学校 HTTPS 证书，并确认非学校目标被拒绝。结果只保存在 `private/check-result.json`，不执行登录和业务操作。
+它会实际经过公网 TLS、VMess 和校内电脑请求配置中允许的所有站点，跟随认证跳转、校验 HTTPS 证书，并确认非学校目标被拒绝。结果只保存在 `private/check-result.json`，不执行登录和业务操作。
 
-默认验证预期：研究生入口跳转 CAS 登录页并返回 `200`，OA `200`，CAS `200`，`other_domain_rejected: true`。这证明登录页面的访问链路可用，不代表已替你登录。
+验证预期：各入口最终返回 `200`，`other_domain_rejected: true`。研究生入口会跳转 CAS 登录页；`yjsxk.jlu.edu.cn` 目前由网站重定向到同域 HTTP 页面，因此检查允许跟随 HTTP/HTTPS 跳转，并报告 `final_scheme`，不会把 HTTP 页面表述为原站全程 HTTPS。这证明入口的访问链路可用，不代表已替你登录。
+
+检查也会报告 `bytes` 和 `empty_response_hosts`。例如 `jlupy.jlu.edu.cn` 的根目录当前可能返回200但无页面内容，此时只能确认响应可达；使用者仍需正确的业务入口路径。HTTP200不等同于业务登录、全部脚本和功能均已验证。
 
 **TCP 显示毫秒数只证明手机能连到入口。** 网页是否能打开还要看完整链路与手机分流日志。[排障指南](docs/troubleshooting.md)
 
@@ -101,13 +117,21 @@ py -3 -B .\jlu_shadowrocket.py check
 DOMAIN,yjs.jlu.edu.cn,JLU-Campus
 DOMAIN,cas.jlu.edu.cn,JLU-Campus
 DOMAIN,oa.jlu.edu.cn,JLU-Campus
+DOMAIN,yjsxk.jlu.edu.cn,JLU-Campus
+DOMAIN,jdjyw.jlu.edu.cn,JLU-Campus
+DOMAIN,jlupy.jlu.edu.cn,JLU-Campus
+DOMAIN,www.jlu.edu.cn,JLU-Campus
+DOMAIN,i.jlu.edu.cn,JLU-Campus
+DOMAIN,cwsf.jlu.edu.cn,JLU-Campus
 ```
 
 保存并使用该配置，全局路由保持“配置”。规则明确指定校园节点，其他网站继续走原有规则。如果你修改了 `node_name`，这里也要同步修改。
 
 ## 配置和停止
 
-首次执行 `setup` 或 `init` 会把 [config.example.json](config.example.json) 复制为 `private/config.json`。在私有配置中调整端口、节点名或允许的具体学校域名，再重启生效。默认仅允许三个域名、TCP 80/443；不接受通配域名，不开放通用代理。
+首次执行 `setup` 或 `init` 会把 [config.example.json](config.example.json) 复制为 `private/config.json`。在私有配置中调整端口、节点名或允许的具体学校域名，再重启生效。默认仅允许上表9个域名、TCP 80/443；不接受通配域名，不开放通用代理。
+
+**已有部署升级：** 更新仓库不会覆盖自己的 `private/config.json`。原来只允许3个域名的使用者，需要将新增6个域名补入该文件的 `allowed_domains`，重启后更新手机分流配置。
 
 增加其他系统时，需要同时保证电脑能访问、补充 `allowed_domains`、重启服务，再更新手机分流配置。跨域静态资源或登录接口也必须明确允许。
 

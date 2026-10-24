@@ -353,20 +353,21 @@ def check(root):
         child = subprocess.Popen([str(sing), "run", "-c", str(client_path)], cwd=root / "private", stdout=log, stderr=log, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         try:
             wait_listening(config["check_port"], child)
-            targets = {"yjs.jlu.edu.cn": "/gsapp/sys/yjsemaphome/portal/index.do", "oa.jlu.edu.cn": "/defaultroot/login.jsp", "cas.jlu.edu.cn": "/tpass/login"}
+            targets = {"yjs.jlu.edu.cn": "/gsapp/sys/yjsemaphome/portal/index.do", "oa.jlu.edu.cn": "/defaultroot/login.jsp", "cas.jlu.edu.cn": "/tpass/login", "cwsf.jlu.edu.cn": "/WF_PAYMENT/"}
             results = []
             for domain in config["allowed_domains"]:
-                command = ["curl.exe", "--silent", "--show-error", "--proxy", f"http://127.0.0.1:{config['check_port']}", "--noproxy", "", "--connect-timeout", "8", "--max-time", "30", "--max-redirs", "5", "--proto-redir", "=https", "-L", "-o", "NUL", "-w", "%{json}", "https://" + domain + targets.get(domain, "/")]
+                command = ["curl.exe", "--silent", "--show-error", "--proxy", f"http://127.0.0.1:{config['check_port']}", "--noproxy", "", "--connect-timeout", "8", "--max-time", "30", "--max-redirs", "5", "--proto-redir", "=http,https", "-L", "-o", "NUL", "-w", "%{json}", "https://" + domain + targets.get(domain, "/")]
                 response = subprocess.run(command, capture_output=True, text=True, timeout=35)
                 if response.returncode:
                     results.append({"target": domain, "ok": False, "error": response.stderr.strip()})
                     continue
                 metadata = json.loads(response.stdout)
-                results.append({"target": domain, "final_host": urlsplit(metadata["url_effective"]).hostname,
-                                "status": metadata["http_code"], "tls_verify_result": metadata["ssl_verify_result"],
+                final_url = urlsplit(metadata["url_effective"])
+                results.append({"target": domain, "final_host": final_url.hostname, "final_scheme": final_url.scheme,
+                                "status": metadata["http_code"], "tls_verify_result": metadata["ssl_verify_result"], "bytes": int(metadata["size_download"]),
                                 "ok": metadata["http_code"] == 200 and metadata["ssl_verify_result"] == 0})
             denied = subprocess.run(["curl.exe", "--silent", "--proxy", f"http://127.0.0.1:{config['check_port']}", "--noproxy", "", "--max-time", "8", "-o", "NUL", "-w", "%{http_code}", "http://example.org/"], capture_output=True, text=True, timeout=10)
-            report = {"sites": results, "other_domain_rejected": denied.returncode != 0 or denied.stdout.strip() in {"403", "502"}}
+            report = {"sites": results, "empty_response_hosts": [item["target"] for item in results if item.get("bytes") == 0], "other_domain_rejected": denied.returncode != 0 or denied.stdout.strip() in {"403", "502"}}
             write_json(root / "private/check-result.json", report)
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return all(item["ok"] for item in results) and report["other_domain_rejected"]

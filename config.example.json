@@ -1,6 +1,10 @@
 {
   "node_name": "JLU-Campus",
-  "allowed_domains": ["yjs.jlu.edu.cn", "cas.jlu.edu.cn", "oa.jlu.edu.cn"],
+  "allowed_domains": [
+    "yjs.jlu.edu.cn", "cas.jlu.edu.cn", "oa.jlu.edu.cn",
+    "yjsxk.jlu.edu.cn", "jdjyw.jlu.edu.cn", "jlupy.jlu.edu.cn",
+    "www.jlu.edu.cn", "i.jlu.edu.cn", "cwsf.jlu.edu.cn"
+  ],
   "allowed_ports": [80, 443],
   "web_port": 18080,
   "vmess_port": 18081,
