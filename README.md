@@ -41,7 +41,16 @@ flowchart LR
 
 复制[Agent 自动部署提示词](docs/agent-install-prompt.md)中的完整内容，填写部署目录，交给能操作你校内 Windows 电脑的 Codex 或其他 Agent。提示词包含环境检查、工具校验、启动、完整链路验证和手机导入指导；不包含任何作者的个人凭据。仅能访问云端容器的 Agent 无法直接部署到你的校内电脑。
 
-## 快速部署：临时入口
+## 快速部署：选择临时或长期入口
+
+先选择入口模式；两种模式都需要校内电脑持续在线，且使用同一套安装、访问控制和手机分流规则。
+
+| 模式 | 需要准备 | 地址变化 | 适用情况 |
+| --- | --- | --- | --- |
+| 临时 `quick`（默认） | 不需要 Cloudflare 账号或域名 | 重建隧道会更换地址 | 首次测试、短期使用 |
+| 长期 `named` | 自己的 Cloudflare 账号、托管域名、命名 Tunnel | 保留域名和路由时，正常重启沿用固定地址 | 日常使用 |
+
+选择长期模式时，先完成下面第1、2步，再按照[固定域名部署](docs/fixed-tunnel.md)配置 Cloudflare 和 `private/config.json`，然后继续第3至5步。“长期”指固定入口，不代表电脑离线后仍可用，也不代表免除域名续费或学校认证。
 
 ### 1. 下载项目
 
@@ -160,7 +169,7 @@ DOMAIN,cwsf.jlu.edu.cn,JLU-Campus
 
 - 实际原型已验证 Windows 校内电脑、Cloudflare 临时入口、Shadowrocket、Safari 和研究生系统 CAS 登录。
 - 本仓库另有本地 HTTP 鉴权、WebSocket 二进制流、配置隔离和归档路径保护测试；运行 `py -3 -B -m unittest discover -s tests -v`。
-- 固定域名模式支持令牌文件参数，但未在本项目的真实命名隧道上完成端到端验证，详见对应文档。
+- 固定域名模式已通过真实命名 Tunnel 的公网完整链路、下载鉴权和重启一致性验证；具体验证范围见[验证记录](docs/validation.md)，仍需各使用者完成自己的手机测试。
 - 未将仅限浏览器重写的 WebVPN 地址作为节点。项目调研参考 [Open-JLU](https://github.com/userElaina/Open-JLU#vpn) 和 [jlu-http-proxy](https://github.com/Yesterday17/jlu-http-proxy)；最终发布的主路径采用校内直连，无需其旧协议参数或登录会话。
 
 本项目是个人维护的非官方工具。各使用者应只访问本人有权使用的学校系统。许可与第三方工具说明见 [LICENSE](LICENSE)、[THIRD_PARTY.md](THIRD_PARTY.md)。
