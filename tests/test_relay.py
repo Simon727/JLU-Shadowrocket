@@ -1,4 +1,5 @@
 import copy
+import base64
 import http.client
 import http.server
 import json
@@ -10,6 +11,7 @@ import threading
 import unittest
 import uuid
 import zipfile
+from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import jlu_shadowrocket as app
@@ -70,21 +72,34 @@ class RelayTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            for query in ("", "?token=wrong"):
-                connection = http.client.HTTPConnection(*server.server_address, timeout=3)
-                connection.request("GET", "/subscription.yaml" + query)
-                response = connection.getresponse()
-                self.assertEqual(response.status, 404)
-                self.assertNotIn(secret["uuid"].encode(), response.read())
-                connection.close()
-            for filename in ("subscription.yaml", "shadowrocket.conf"):
+            for filename in ("subscription.txt", "subscription.yaml"):
+                for query in ("", "?token=wrong"):
+                    connection = http.client.HTTPConnection(*server.server_address, timeout=3)
+                    connection.request("GET", "/" + filename + query)
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 404)
+                    self.assertNotIn(secret["uuid"].encode(), response.read())
+                    connection.close()
+            for filename in ("subscription.txt", "subscription.yaml", "shadowrocket.conf"):
                 connection = http.client.HTTPConnection(*server.server_address, timeout=3)
                 connection.request("GET", "/" + filename + "?token=" + secret["token"])
                 response = connection.getresponse()
                 body = response.read().decode()
                 self.assertEqual(response.status, 200)
                 self.assertEqual(response.getheader("Cache-Control"), "no-store")
-                if filename.endswith(".yaml"):
+                if filename.endswith(".txt"):
+                    uri = base64.b64decode(body).decode().strip()
+                    parsed = urlsplit(uri)
+                    self.assertEqual(parsed.scheme, "vmess")
+                    self.assertEqual(base64.b64decode(parsed.netloc).decode(),
+                                     f"aes-128-gcm:{secret['uuid']}@{published['host']}:443")
+                    fields = parse_qs(parsed.query)
+                    self.assertEqual(fields["obfsParam"], [published["host"]])
+                    self.assertEqual(fields["peer"], [published["host"]])
+                    self.assertEqual(fields["path"], [secret["ws_path"]])
+                    self.assertEqual(fields["tls"], ["1"])
+                    self.assertNotIn("allowInsecure", fields)
+                elif filename.endswith(".yaml"):
                     node = json.loads(body.split("  - ", 1)[1])
                     self.assertEqual(node["uuid"], secret["uuid"])
                     self.assertTrue(node["tls"])
@@ -97,6 +112,18 @@ class RelayTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_native_subscription_roundtrips_name_and_websocket_path(self):
+        config = dict(DEFAULT, node_name="Campus + test")
+        secret = {"uuid": str(uuid.uuid4()), "ws_path": "/private path?ed=2048&key=a+b"}
+        encoded = app.make_shadowrocket_subscription("campus.example.com", config, secret)
+        uri = base64.b64decode(encoded).decode().strip()
+        fields = parse_qs(urlsplit(uri).query)
+        self.assertEqual(fields["remarks"], [config["node_name"]])
+        self.assertEqual(fields["path"], [secret["ws_path"]])
+        self.assertEqual(fields["obfsParam"], ["campus.example.com"])
+        with self.assertRaises(ValueError):
+            app.make_shadowrocket_subscription("bad.example.com\r\nHost: attacker", config, secret)
 
     def test_websocket_preserves_pipelined_binary_frames(self):
         config, secret = app.initialize(workspace())

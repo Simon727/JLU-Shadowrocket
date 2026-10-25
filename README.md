@@ -104,6 +104,8 @@ Quick Tunnel 不需要 Cloudflare 账号或自己的域名，但入口每次重�
 
 CAS 统一身份认证页面属于学校业务系统的正常登录流程。网络连通不会代替学校账号认证；主动点击“退出登录”后，下一次可能需要重新认证。
 
+默认订阅仍为 `/subscription.yaml`。另提供可选的 `/subscription.txt` 原生 VMess URI 订阅，使用同一下载令牌、节点名和密钥；需要时只替换链接中的文件名即可。两种格式不要同时反复导入制造同名条目。原生格式已通过生成、编码和下载鉴权测试，具体手机仍须实际验证；切换格式不能代替网络排障。
+
 不要用“全局代理”作为日常模式：服务端只允许配置中的学校域名，其他目标会被拒绝，可能使微信等应用无法联网。
 
 ### 5. 验证完整链路
@@ -169,7 +171,7 @@ DOMAIN,cwsf.jlu.edu.cn,JLU-Campus
 
 - 实际原型已验证 Windows 校内电脑、Cloudflare 临时入口、Shadowrocket、Safari 和研究生系统 CAS 登录。
 - 本仓库另有本地 HTTP 鉴权、WebSocket 二进制流、配置隔离和归档路径保护测试；运行 `py -3 -B -m unittest discover -s tests -v`。
-- 固定域名模式已通过真实命名 Tunnel 的公网完整链路、下载鉴权和重启一致性验证。2026-10-25，同结构原型还通过手机 OA 访问对照：保留可用临时节点的密钥、路径和配置，仅修改地址、TLS SNI、WebSocket Host 后，固定入口也可用。独立发布版与原型的验证范围见[验证记录](docs/validation.md)，各使用者仍需完成自己的手机测试。
+- 固定域名模式已通过真实命名 Tunnel 的公网完整链路、下载鉴权和重启一致性验证。2026-10-25，原型曾在手改三个域名字段后成功访问 OA，但重新导入后再次失败；核对手机参数和服务端数据流后，受控重启服务，手机保持原参数恢复访问。尚未确定唯一根因，不能把手改成功当作订阅故障已修复。独立发布版与原型的验证范围见[验证记录](docs/validation.md)，各使用者仍需完成自己的手机测试。
 - 未将仅限浏览器重写的 WebVPN 地址作为节点。项目调研参考 [Open-JLU](https://github.com/userElaina/Open-JLU#vpn) 和 [jlu-http-proxy](https://github.com/Yesterday17/jlu-http-proxy)；最终发布的主路径采用校内直连，无需其旧协议参数或登录会话。
 
 本项目是个人维护的非官方工具。各使用者应只访问本人有权使用的学校系统。许可与第三方工具说明见 [LICENSE](LICENSE)、[THIRD_PARTY.md](THIRD_PARTY.md)。

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import hmac
 import http.server
@@ -19,7 +20,7 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 import uuid
 import zipfile
 
@@ -104,6 +105,16 @@ def make_routing(config):
     return "[General]\ndns-server = system\nipv6 = false\ntun-excluded-routes = 127.0.0.0/8\n\n[Rule]\n" + "\n".join(rules) + "\nFINAL,DIRECT\n"
 
 
+def make_shadowrocket_subscription(host, config, secret):
+    """Native VMess URI list: WS Host is a plain hostname, never a JSON object."""
+    node = make_node(host, config, secret)
+    authority = base64.b64encode(f"{node['cipher']}:{node['uuid']}@{host}:{node['port']}".encode()).decode()
+    query = urlencode({"remarks": node["name"], "alterId": "0", "tls": "1", "peer": host,
+                       "obfs": "websocket", "obfsParam": host, "path": secret["ws_path"], "udp": "0"})
+    uri = f"vmess://{authority}?{query}\n"
+    return base64.b64encode(uri.encode()).decode() + "\n"
+
+
 def make_handler(config, secret, published):
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -137,11 +148,14 @@ def make_handler(config, secret, published):
                 return
             if parsed.path == "/shadowrocket.conf":
                 self.reply(200, make_routing(config).encode())
-            elif parsed.path == "/subscription.yaml":
+            elif parsed.path in ("/subscription.txt", "/subscription.yaml"):
                 if not published.get("host"):
                     self.reply(503, b"Public hostname not ready\n")
                     return
-                body = "proxies:\n  - " + json.dumps(make_node(published["host"], config, secret)) + "\n"
+                if parsed.path == "/subscription.txt":
+                    body = make_shadowrocket_subscription(published["host"], config, secret)
+                else:
+                    body = "proxies:\n  - " + json.dumps(make_node(published["host"], config, secret)) + "\n"
                 self.reply(200, body.encode())
             else:
                 self.reply(404)
