@@ -56,6 +56,14 @@ def validate_config(config):
         raise ValueError("tunnel_mode must be quick or named")
     if config["tunnel_mode"] == "named" and not HOSTNAME.fullmatch(config.get("hostname", "")):
         raise ValueError("Named tunnels need a hostname without https:// or a path")
+    if not isinstance(config.get("tunnel_protocol", "http2"), str) or config.get("tunnel_protocol", "http2") not in {"auto", "http2", "quic"}:
+        raise ValueError("tunnel_protocol must be auto, http2 or quic")
+    if not isinstance(config.get("data_tunnel", "same"), str) or config.get("data_tunnel", "same") not in {"same", "quick"}:
+        raise ValueError("data_tunnel must be same or quick")
+    if config.get("data_tunnel") == "quick":
+        port = config.get("data_metrics_port")
+        if config["tunnel_mode"] != "named" or type(port) is not int or not 1024 <= port <= 65535 or port in local_ports:
+            raise ValueError("Quick data with fixed subscriptions needs named mode and a fifth distinct data_metrics_port")
     return config
 
 
@@ -149,13 +157,13 @@ def make_handler(config, secret, published):
             if parsed.path == "/shadowrocket.conf":
                 self.reply(200, make_routing(config).encode())
             elif parsed.path in ("/subscription.txt", "/subscription.yaml"):
-                if not published.get("host"):
+                if not published.get("host") or (config.get("data_tunnel") == "quick" and not published.get("node_host")):
                     self.reply(503, b"Public hostname not ready\n")
                     return
                 if parsed.path == "/subscription.txt":
-                    body = make_shadowrocket_subscription(published["host"], config, secret)
+                    body = make_shadowrocket_subscription(published.get("node_host", published["host"]), config, secret)
                 else:
-                    body = "proxies:\n  - " + json.dumps(make_node(published["host"], config, secret)) + "\n"
+                    body = "proxies:\n  - " + json.dumps(make_node(published.get("node_host", published["host"]), config, secret)) + "\n"
                 self.reply(200, body.encode())
             else:
                 self.reply(404)
@@ -260,7 +268,7 @@ def token_path(root, config):
 
 def cloud_command(root, config, cloud):
     private = root / "private"
-    command = [str(cloud), "tunnel", "--config", str(private / "cloudflared.yml"), "--no-autoupdate", "--protocol", "http2", "--edge-ip-version", "4", "--metrics", f"127.0.0.1:{config['metrics_port']}"]
+    command = [str(cloud), "tunnel", "--config", str(private / "cloudflared.yml"), "--no-autoupdate", "--protocol", config.get("tunnel_protocol", "http2"), "--edge-ip-version", "4", "--metrics", f"127.0.0.1:{config['metrics_port']}"]
     if config["tunnel_mode"] == "quick":
         command += ["--url", f"http://127.0.0.1:{config['web_port']}"]
     else:
@@ -298,11 +306,16 @@ def start(root):
     runtime_path = private / "runtime.json"
     write_json(runtime_path, runtime)
     try:
-        with (private / "sing-box.log").open("a", encoding="utf-8") as sing_log, (private / "cloudflared.log").open("a", encoding="utf-8") as cloud_log:
+        with (private / "sing-box.log").open("a", encoding="utf-8") as sing_log, (private / "cloudflared.log").open("a", encoding="utf-8") as cloud_log, (private / "cloudflared-data.log").open("a", encoding="utf-8") as data_log:
             children.append(subprocess.Popen([str(sing), "run", "-c", str(private / "sing-box-server.json")], cwd=private, env=environment, stdout=sing_log, stderr=sing_log, creationflags=flags))
             wait_listening(config["vmess_port"], children[0])
             offset = (private / "cloudflared.log").stat().st_size
             children.append(subprocess.Popen(cloud_command(root, config, cloud), cwd=private, env=environment, stdout=cloud_log, stderr=cloud_log, creationflags=flags))
+            separate_data = config.get("data_tunnel") == "quick"
+            data_offset = (private / "cloudflared-data.log").stat().st_size
+            if separate_data:
+                data_config = dict(config, tunnel_mode="quick", tunnel_protocol="http2", metrics_port=config["data_metrics_port"])
+                children.append(subprocess.Popen(cloud_command(root, data_config, cloud), cwd=private, env=environment, stdout=data_log, stderr=data_log, creationflags=flags))
             print("Starting Cloudflare transport; keep this window open. Ctrl+C stops this instance.", flush=True)
             started = time.monotonic()
             while all(child.poll() is None for child in children):
@@ -314,14 +327,20 @@ def start(root):
                             reader.seek(offset)
                             match = re.search(r"https://([a-z0-9-]+\.trycloudflare\.com)", reader.read())
                         host = match.group(1) if match else ""
-                    if host:
-                        published["host"] = host
+                    node_host = host
+                    if separate_data:
+                        with (private / "cloudflared-data.log").open(encoding="utf-8", errors="replace") as reader:
+                            reader.seek(data_offset)
+                            match = re.search(r"https://([a-z0-9-]+\.trycloudflare\.com)", reader.read())
+                        node_host = match.group(1) if match else ""
+                    if host and node_host:
+                        published.update(host=host, node_host=node_host)
                         links = {"subscription": f"https://{host}/subscription.yaml?token={secret['token']}",
                                  "config": f"https://{host}/shadowrocket.conf?token={secret['token']}"}
                         write_json(private / "links.json", links)
-                        write_json(private / "node.json", make_node(host, config, secret))
+                        write_json(private / "node.json", make_node(node_host, config, secret))
                         (private / "shadowrocket.conf").write_text(make_routing(config), encoding="utf-8")
-                        runtime.update(status="running", host=host, pids=[p.pid for p in children])
+                        runtime.update(status="running", host=host, node_host=node_host, pids=[p.pid for p in children])
                         write_json(runtime_path, runtime)
                         print("\nPhone import links (private; do not publish):", flush=True)
                         print("Subscription: " + links["subscription"], flush=True)
@@ -352,7 +371,28 @@ def check(root):
     if runtime.get("status") != "running":
         raise ValueError("Start the relay in another terminal first")
     sing, _ = executables(root)
-    host = runtime["host"]
+    host = runtime.get("node_host", runtime["host"])
+    links = read_json(root / "private/links.json")
+    downloads = {}
+    for kind in ("subscription", "config"):
+        result = subprocess.run(["curl.exe", "--noproxy", "*", "--silent", "--show-error", "--connect-timeout", "8", "--max-time", "20", "--write-out", "\n%{http_code} %{ssl_verify_result}", links[kind]], capture_output=True, text=True, timeout=25)
+        ok = False
+        try:
+            body, metadata = result.stdout.rsplit("\n", 1)
+            ok = result.returncode == 0 and metadata.strip() == "200 0"
+            if ok and kind == "subscription":
+                if body.startswith("proxies:"):
+                    node = json.loads(body.split("  - ", 1)[1])
+                    ok = node["server"] == host and node["sni"] == host and node["uuid"] == secret["uuid"] and node["ws-opts"]["path"] == secret["ws_path"] and node["ws-opts"]["headers"]["Host"] == host and node["tls"] is True
+                else:
+                    uri = urlsplit(base64.b64decode(body).decode().strip())
+                    fields = parse_qs(uri.query)
+                    ok = base64.b64decode(uri.netloc).decode() == f"aes-128-gcm:{secret['uuid']}@{host}:443" and fields.get("peer") == [host] and fields.get("obfsParam") == [host] and fields.get("tls") == ["1"] and fields.get("path") == [secret["ws_path"]]
+            elif ok:
+                ok = all(f"DOMAIN,{domain}," in body for domain in config["allowed_domains"])
+        except (ValueError, KeyError, IndexError, TypeError, UnicodeError):
+            ok = False
+        downloads[kind] = bool(ok)
     outbound = {"type": "vmess", "tag": "relay", "server": host, "server_port": 443,
                 "uuid": secret["uuid"], "security": "aes-128-gcm", "alter_id": 0,
                 "tls": {"enabled": True, "server_name": host},
@@ -381,10 +421,10 @@ def check(root):
                                 "status": metadata["http_code"], "tls_verify_result": metadata["ssl_verify_result"], "bytes": int(metadata["size_download"]),
                                 "ok": metadata["http_code"] == 200 and metadata["ssl_verify_result"] == 0})
             denied = subprocess.run(["curl.exe", "--silent", "--proxy", f"http://127.0.0.1:{config['check_port']}", "--noproxy", "", "--max-time", "8", "-o", "NUL", "-w", "%{http_code}", "http://example.org/"], capture_output=True, text=True, timeout=10)
-            report = {"sites": results, "empty_response_hosts": [item["target"] for item in results if item.get("bytes") == 0], "other_domain_rejected": denied.returncode != 0 or denied.stdout.strip() in {"403", "502"}}
+            report = {"sites": results, "downloads": downloads, "control_and_data_hosts_differ": host != runtime["host"], "empty_response_hosts": [item["target"] for item in results if item.get("bytes") == 0], "other_domain_rejected": denied.returncode != 0 or denied.stdout.strip() in {"403", "502"}}
             write_json(root / "private/check-result.json", report)
             print(json.dumps(report, ensure_ascii=False, indent=2))
-            return all(item["ok"] for item in results) and report["other_domain_rejected"]
+            return all(item["ok"] for item in results) and all(downloads.values()) and report["other_domain_rejected"]
         finally:
             if child.poll() is None:
                 child.terminate()

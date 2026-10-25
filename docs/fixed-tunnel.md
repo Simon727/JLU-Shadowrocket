@@ -45,6 +45,29 @@ py -3 -B .\jlu_shadowrocket.py check
 
 首次验证成功后，在启动窗口按 Ctrl+C 停止本实例，再运行 `start`，确认主机名和链接不变，并重新执行 `check`。这项重启验证不需要删除 Tunnel、DNS、配置或密钥。
 
+## 固定订阅 + Quick 数据通道
+
+如果手机端固定数据入口反复卡住，而真实 Quick 数据入口能完整传输，可保留固定下载地址，将校园流量交给独立的 Quick 隧道。Cloudflare 的固定 Published application 路由仍指向本机 `web_port`，无需新增域名或改动原 DNS。
+
+编辑 `private/config.json`，在已有 named 配置中增加：
+
+```json
+{
+  "data_tunnel": "quick",
+  "data_metrics_port": 18084
+}
+```
+
+这是字段片段，不要覆盖整份配置。`data_metrics_port` 必须与原四个本地端口不同。正常停止本项目后原样启动，程序会运行一条命名下载隧道和一条 Quick 数据隧道，复用同一个 HTTP 前端、VMess 后端和密钥；等待 Quick 域名生成后才发布链接。
+
+- `Subscription`、`Config` 仍使用固定域名，重新启动后 URL 保持不变。
+- 订阅里的节点地址、TLS SNI、WebSocket Host 使用 Quick 数据域名，三者应一致；它们不必等于订阅 URL 的域名。不要把节点手改成固定域名。
+- 手机首次导入后保持同一个节点名称。电脑重建 Quick 隧道会改变数据域名，届时更新原固定订阅即可；不必重新建立订阅或更换学校规则。
+- `check` 分别检查固定下载地址与 Quick 业务路径。`runtime.json` 中 `host` 是固定控制地址，`node_host` 是实际数据地址；二者不同是预期行为。
+- Quick 数据通道没有可用性保证。分离模式提供固定的订阅发现地址，并没有把临时数据域名变成永久域名；当前程序的进程退出会停止该实例，需要重新启动并刷新订阅，不承诺后台自动续期或无需维护。
+
+回到固定数据模式时，将 `data_tunnel` 设为 `same`，受控重启后刷新订阅，仍需手机完整传输验证。已能用的手机配置应保留，避免反复换节点名称。
+
 ## 从临时模式迁移或切回
 
 - 保存原配置的本地副本，保留 `private/secrets.json`。使用同一实例切换时，停止本实例后只修改上述三个字段，保留端口、学校域名和 `node_name`。
@@ -68,6 +91,10 @@ py -3 -B .\jlu_shadowrocket.py check
 一次手改成功并不能证明重新订阅也成功。若重新导入后再次失败，应核对手机实际导出与本机参数，以及服务端是否已完成 WebSocket 升级、VMess 认证和目标出站；不要仅凭节点名称或 Host 在 JSON 中的表示形式确定根因。受控重启本项目实例前记录当前版本和参数，不删除数据，也不更换密钥。恢复后保留可用节点，直到有实际需要再导入。
 
 令牌通过文件路径传给 cloudflared，不放在进程命令行中。不要把令牌、`private/`、包含令牌的日志或控制台截图提交到 GitHub。需要更换密钥时先停止服务，在自己的 Cloudflare 账户处理 Tunnel 令牌，再按原路径更新本地文件。
+
+### 隧道传输协议对照
+
+可选 `tunnel_protocol` 支持 `http2`（默认）、`auto`、`quic`，只控制电脑到 Cloudflare 的隧道传输，不改变手机 VMess 或学校规则。分离模式的数据隧道使用 HTTP2。修改协议时记录原值，只重启本项目，再用完整传输对照，不能仅凭 TCP 延迟判断修复；本次个人环境改为 QUIC 仍有固定数据超时，未将其当作最终修复。[Cloudflare 官方排障](https://developers.cloudflare.com/tunnel/troubleshooting/)
 
 ## 官方资料
 

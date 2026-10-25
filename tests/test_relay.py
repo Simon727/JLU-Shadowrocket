@@ -2,13 +2,16 @@ import copy
 import base64
 import http.client
 import http.server
+import io
 import json
 from pathlib import Path
 import socket
 import socketserver
 import sys
 import threading
+import time
 import unittest
+from unittest import mock
 import uuid
 import zipfile
 from urllib.parse import parse_qs, urlsplit
@@ -50,7 +53,10 @@ class RelayTests(unittest.TestCase):
         for changes in ({"allowed_domains": ["example.org"]}, {"allowed_domains": ["*.jlu.edu.cn"]},
                         {"allowed_domains": ["yjs.jlu.edu.cn\r\nINJECT"]}, {"node_name": "bad,name"},
                         {"web_port": DEFAULT["vmess_port"]}, {"allowed_ports": [0]},
-                        {"tunnel_mode": "named", "hostname": "https://example.org/path"}):
+                        {"tunnel_mode": "named", "hostname": "https://example.org/path"},
+                        {"tunnel_protocol": "invalid"},
+                        {"data_tunnel": "quick"},
+                        {"tunnel_mode": "named", "hostname": "campus.example.com", "data_tunnel": "quick", "data_metrics_port": DEFAULT["metrics_port"]}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 app.validate_config(dict(DEFAULT, **changes))
 
@@ -124,6 +130,127 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(fields["obfsParam"], ["campus.example.com"])
         with self.assertRaises(ValueError):
             app.make_shadowrocket_subscription("bad.example.com\r\nHost: attacker", config, secret)
+
+    def test_tunnel_protocol_selection_keeps_credentials_out_of_command(self):
+        folder = workspace()
+        config, _ = app.initialize(folder)
+        (folder / "private/cloudflare-token.txt").write_text("fixture-dedicated-tunnel-token", encoding="utf-8")
+        config.update(tunnel_mode="named", hostname="campus.example.com")
+        for protocol in ("auto", "http2", "quic"):
+            selected = dict(config, tunnel_protocol=protocol)
+            app.validate_config(selected)
+            command = app.cloud_command(folder, selected, Path("cloudflared.exe"))
+            self.assertEqual(command[command.index("--protocol") + 1], protocol)
+            self.assertIn("--token-file", command)
+            self.assertNotIn("--token", command)
+
+    def test_fixed_subscription_does_not_replace_quick_data_host(self):
+        folder = workspace()
+        config, secret = app.initialize(folder)
+        config.update(tunnel_mode="named", hostname="campus.example.com", data_tunnel="quick", data_metrics_port=18084)
+        app.validate_config(config)
+        published = {"host": config["hostname"]}
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), app.make_handler(config, secret, published))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            pending = http.client.HTTPConnection(*server.server_address, timeout=3)
+            pending.request("GET", "/subscription.yaml?token=" + secret["token"])
+            response = pending.getresponse()
+            self.assertEqual(response.status, 503)
+            self.assertNotIn(secret["uuid"].encode(), response.read())
+            pending.close()
+            published["node_host"] = "fixture.trycloudflare.com"
+            for filename in ("subscription.yaml", "subscription.txt"):
+                connection = http.client.HTTPConnection(*server.server_address, timeout=3)
+                connection.request("GET", "/" + filename + "?token=" + secret["token"])
+                response = connection.getresponse()
+                body = response.read().decode()
+                self.assertEqual(response.status, 200)
+                if filename.endswith(".yaml"):
+                    node = json.loads(body.split("  - ", 1)[1])
+                    self.assertEqual(node["server"], published["node_host"])
+                    self.assertEqual(node["sni"], published["node_host"])
+                    self.assertEqual(node["ws-opts"]["headers"]["Host"], published["node_host"])
+                else:
+                    uri = base64.b64decode(body).decode().strip()
+                    fields = parse_qs(urlsplit(uri).query)
+                    self.assertEqual(fields["peer"], [published["node_host"]])
+                    self.assertEqual(fields["obfsParam"], [published["node_host"]])
+                connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_split_start_publishes_fixed_links_with_quick_node(self):
+        folder = workspace()
+        config, secret = app.initialize(folder)
+        with socket.socket() as port_probe:
+            port_probe.bind(("127.0.0.1", 0))
+            web_port = port_probe.getsockname()[1]
+        config.update(web_port=web_port, tunnel_mode="named", hostname="campus.example.com", data_tunnel="quick", data_metrics_port=18084)
+        app.validate_config(config)
+        (folder / "private/cloudflare-token.txt").write_text("fixture-token", encoding="utf-8")
+        stop = threading.Event()
+        commands, errors = [], []
+
+        class ExternalProcess:
+            def __init__(self, command, **kwargs):
+                commands.append(command)
+                self.pid = 900000 + len(commands)
+                if "--url" in command:
+                    kwargs["stdout"].write("https://fixture.trycloudflare.com\n")
+                    kwargs["stdout"].flush()
+            def poll(self):
+                return 0 if stop.is_set() else None
+            def terminate(self):
+                pass
+            def wait(self, **kwargs):
+                return 0
+
+        def run():
+            try:
+                app.start(folder)
+            except Exception as error:
+                errors.append(error)
+
+        with mock.patch.object(app, "prepare", return_value=(config, secret, Path("sing-box.exe"), Path("cloudflared.exe"))), mock.patch.object(app, "wait_listening"), mock.patch.object(app.subprocess, "Popen", side_effect=ExternalProcess), mock.patch.object(sys, "stdout", io.StringIO()):
+            worker = threading.Thread(target=run)
+            worker.start()
+            try:
+                deadline = time.monotonic() + 5
+                ready = False
+                while time.monotonic() < deadline:
+                    try:
+                        ready = app.read_json(folder / "private/runtime.json").get("status") == "running"
+                    except (OSError, ValueError):
+                        ready = False
+                    if ready:
+                        break
+                    time.sleep(.05)
+                self.assertTrue(ready, "split instance did not publish its ready runtime")
+                links = app.read_json(folder / "private/links.json")
+                node = app.read_json(folder / "private/node.json")
+                self.assertTrue(links["subscription"].startswith("https://campus.example.com/"))
+                self.assertEqual(node["server"], "fixture.trycloudflare.com")
+                connection = http.client.HTTPConnection("127.0.0.1", web_port, timeout=3)
+                connection.request("GET", "/subscription.yaml?token=" + secret["token"])
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                downloaded = json.loads(response.read().decode().split("  - ", 1)[1])
+                connection.close()
+                self.assertEqual(downloaded, node)
+                runtime = app.read_json(folder / "private/runtime.json")
+                self.assertEqual(runtime["host"], "campus.example.com")
+                self.assertEqual(runtime["node_host"], "fixture.trycloudflare.com")
+                self.assertEqual(len(commands), 3)
+                self.assertEqual(sum("--token-file" in command for command in commands), 1)
+                self.assertEqual(sum("--url" in command for command in commands), 1)
+            finally:
+                stop.set()
+                worker.join(timeout=5)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(len(errors), 1)
+            self.assertIsInstance(errors[0], RuntimeError)
 
     def test_websocket_preserves_pipelined_binary_frames(self):
         config, secret = app.initialize(workspace())

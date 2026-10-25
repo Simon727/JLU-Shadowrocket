@@ -49,8 +49,11 @@ flowchart LR
 | --- | --- | --- | --- |
 | 临时 `quick`（默认） | 不需要 Cloudflare 账号或域名 | 重建隧道会更换地址 | 首次测试、短期使用 |
 | 长期 `named` | 自己的 Cloudflare 账号、托管域名、命名 Tunnel | 保留域名和路由时，正常重启沿用固定地址 | 日常使用 |
+| 固定订阅 + Quick 数据 `named` / `data_tunnel=quick` | 同长期模式 | 订阅 URL 固定，数据域名在重建后变化 | 固定数据路径不稳定、Quick 已验证可用 |
 
 选择长期模式时，先完成下面第1、2步，再按照[固定域名部署](docs/fixed-tunnel.md)配置 Cloudflare 和 `private/config.json`，然后继续第3至5步。“长期”指固定入口，不代表电脑离线后仍可用，也不代表免除域名续费或学校认证。
+
+固定订阅与数据通道可以分离。`data_tunnel=quick` 时，固定域名只提供小体积的订阅和配置下载，节点地址、TLS SNI、WebSocket Host 均为实际 Quick 域名；不要将它们手改成固定订阅域名。电脑重建数据隧道后，刷新原固定订阅即可，不用更换订阅 URL。Quick 数据通道仍无可用性保证，这种方式不等同于固定数据域名。[分离模式设置](docs/fixed-tunnel.md#固定订阅--quick-数据通道)
 
 ### 1. 下载项目
 
@@ -120,6 +123,8 @@ py -3 -B .\jlu_shadowrocket.py check
 
 验证预期：各入口最终返回 `200`，`other_domain_rejected: true`。研究生入口会跳转 CAS 登录页；`yjsxk.jlu.edu.cn` 目前由网站重定向到同域 HTTP 页面，因此检查允许跟随 HTTP/HTTPS 跳转，并报告 `final_scheme`，不会把 HTTP 页面表述为原站全程 HTTPS。这证明入口的访问链路可用，不代表已替你登录。
 
+`check` 也验证实际订阅、配置的 HTTPS 下载及订阅中的数据域名/密钥/路径。分离模式应显示 `control_and_data_hosts_differ: true`，`downloads` 两项为 true；业务访问测试走数据通道，不能把订阅能下载等同于数据能传输。
+
 检查也会报告 `bytes` 和 `empty_response_hosts`。例如 `jlupy.jlu.edu.cn` 的根目录当前可能返回200但无页面内容，此时只能确认响应可达；使用者仍需正确的业务入口路径。HTTP200不等同于业务登录、全部脚本和功能均已验证。
 
 **TCP 显示毫秒数只证明手机能连到入口。** 网页是否能打开还要看完整链路与手机分流日志。[排障指南](docs/troubleshooting.md)
@@ -172,6 +177,7 @@ DOMAIN,cwsf.jlu.edu.cn,JLU-Campus
 - 实际原型已验证 Windows 校内电脑、Cloudflare 临时入口、Shadowrocket、Safari 和研究生系统 CAS 登录。
 - 本仓库另有本地 HTTP 鉴权、WebSocket 二进制流、配置隔离和归档路径保护测试；运行 `py -3 -B -m unittest discover -s tests -v`。
 - 固定域名模式已通过真实命名 Tunnel 的公网完整链路、下载鉴权和重启一致性验证。2026-10-25，原型曾在手改三个域名字段后成功访问 OA，但重新导入后再次失败；核对手机参数和服务端数据流后，受控重启服务，手机保持原参数恢复访问。尚未确定唯一根因，不能把手改成功当作订阅故障已修复。独立发布版与原型的验证范围见[验证记录](docs/validation.md)，各使用者仍需完成自己的手机测试。
+- 后续手机随机数据对照确认该环境固定数据路径不稳定，Quick 数据路径完整通过。原型改用“固定订阅 + Quick 数据”后，用户刷新固定订阅并确认 OA 可用；这没有修复固定数据路径，也不构成所有运营商的稳定性保证。通用程序新增对应分离选项和启动流程回归测试。
 - 未将仅限浏览器重写的 WebVPN 地址作为节点。项目调研参考 [Open-JLU](https://github.com/userElaina/Open-JLU#vpn) 和 [jlu-http-proxy](https://github.com/Yesterday17/jlu-http-proxy)；最终发布的主路径采用校内直连，无需其旧协议参数或登录会话。
 
 本项目是个人维护的非官方工具。各使用者应只访问本人有权使用的学校系统。许可与第三方工具说明见 [LICENSE](LICENSE)、[THIRD_PARTY.md](THIRD_PARTY.md)。

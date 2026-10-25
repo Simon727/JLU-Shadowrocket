@@ -11,6 +11,9 @@
   "metrics_port": 18082,
   "check_port": 18083,
   "tunnel_mode": "quick",
+  "tunnel_protocol": "http2",
+  "data_tunnel": "same",
+  "data_metrics_port": 18084,
   "hostname": "",
   "cloudflare_token_file": "cloudflare-token.txt"
 }
