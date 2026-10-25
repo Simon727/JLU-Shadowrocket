@@ -169,7 +169,7 @@ DOMAIN,cwsf.jlu.edu.cn,JLU-Campus
 
 - 实际原型已验证 Windows 校内电脑、Cloudflare 临时入口、Shadowrocket、Safari 和研究生系统 CAS 登录。
 - 本仓库另有本地 HTTP 鉴权、WebSocket 二进制流、配置隔离和归档路径保护测试；运行 `py -3 -B -m unittest discover -s tests -v`。
-- 固定域名模式已通过真实命名 Tunnel 的公网完整链路、下载鉴权和重启一致性验证；具体验证范围见[验证记录](docs/validation.md)，仍需各使用者完成自己的手机测试。
+- 固定域名模式已通过真实命名 Tunnel 的公网完整链路、下载鉴权和重启一致性验证。2026-10-25，同结构原型还通过手机 OA 访问对照：保留可用临时节点的密钥、路径和配置，仅修改地址、TLS SNI、WebSocket Host 后，固定入口也可用。独立发布版与原型的验证范围见[验证记录](docs/validation.md)，各使用者仍需完成自己的手机测试。
 - 未将仅限浏览器重写的 WebVPN 地址作为节点。项目调研参考 [Open-JLU](https://github.com/userElaina/Open-JLU#vpn) 和 [jlu-http-proxy](https://github.com/Yesterday17/jlu-http-proxy)；最终发布的主路径采用校内直连，无需其旧协议参数或登录会话。
 
 本项目是个人维护的非官方工具。各使用者应只访问本人有权使用的学校系统。许可与第三方工具说明见 [LICENSE](LICENSE)、[THIRD_PARTY.md](THIRD_PARTY.md)。
